@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<root main_tree_to_execute="BehaviorTree">
+    <!-- ////////// -->
+    <BehaviorTree ID="BehaviorTree">
+        <Sequence name="startSequence">
+            <Action ID="initialPose" name="getInitialPose"/>
+            <Action ID="goalPose" name="getGoalPose"/>
+            <Action ID="waitMap"/>
+            <Action ID="cleanup"/>
+        </Sequence>
+    </BehaviorTree>
+    <!-- ////////// -->
+    <TreeNodesModel>
+        <Decorator ID="ExitIfFailure"/>
+        <Action ID="cleanup"/>
+        <Action ID="goalPose"/>
+        <Action ID="init"/>
+        <Action ID="initialPose"/>
+        <Action ID="waitMap"/>
+    </TreeNodesModel>
+    <!-- ////////// -->
+</root>
+
