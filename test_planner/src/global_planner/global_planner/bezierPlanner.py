@@ -23,7 +23,7 @@ class Bezier:
 
         self.angles = [0, pi/2]
 
-        self.positions = [(1.0, 1.0), (1, -1.0), (1.0, 0.0)]
+        self.positions = [(0.5, 0.5), (0.5, -0.5), (0.5, 0.0)]
         
         self.initialState = State(0.0, 0.0, 0.0)
         self.finalState = State(0.0, 0.0, 0.0)
@@ -58,7 +58,10 @@ class Bezier:
                 theta += initialState.theta
                 finalState.x = initialState.x + d * cos(theta)
                 finalState.y = initialState.y + d * sin(theta)
-                finalState.theta = initialState.theta + angle * y
+                if (y == 0.0):
+                    y = 1.0
+                    angle = 0.0
+                finalState.theta = initialState.theta + angle * (y / abs(y))
                 # print(f'finalState: {finalState}')
                 finalStates.append(copy.deepcopy(finalState))
 
@@ -77,13 +80,13 @@ class Bezier:
         return finalStates
 
     def getControlPoints(self, initialState: State, finalState: State):
-        
-        cpx = initialState.x + (1.414 * (1/3)) * cos(initialState.theta)
-        cpy = initialState.y + (1.414 * (1/3)) * sin(initialState.theta)
+        distance = sqrt (0.5 ** 2 + 0.5 ** 2)
+        cpx = initialState.x + (distance * (1/3)) * cos(initialState.theta)
+        cpy = initialState.y + (distance * (1/3)) * sin(initialState.theta)
         cp1 = State(cpx, cpy, initialState.theta)
 
-        cpx = finalState.x - (1.414 * (1/3)) * cos(finalState.theta)
-        cpy = finalState.y - (1.414 * (1/3)) * sin(finalState.theta)
+        cpx = finalState.x - (distance * (1/3)) * cos(finalState.theta)
+        cpy = finalState.y - (distance * (1/3)) * sin(finalState.theta)
         cp2 = State(cpx, cpy, finalState.theta)
 
         return cp1, cp2
