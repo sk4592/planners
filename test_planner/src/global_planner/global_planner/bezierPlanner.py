@@ -28,20 +28,26 @@ class Bezier:
         self.initialState = State(0.0, 0.0, 0.0)
         self.finalState = State(0.0, 0.0, 0.0)
 
-        finalStates = self.bezierFunction(self.initialState)
-        print(finalStates)
-        finalStates2 = []
-        for nFinalState in finalStates:
-            self.finalState = State(0.0, 0.0, 0.0)
-            finalStates2.append(self.bezierFunction(nFinalState))
+        # finalStates = self.bezierFunction(self.initialState)
+        # print(finalStates)
+        # finalStates2 = []
+        # for nFinalState in finalStates:
+        #     self.finalState = State(0.0, 0.0, 0.0)
+        #     finalStates2.append(self.bezierFunction(nFinalState))
 
-        for finals in finalStates2:
-            for state in finals:
-                self.finalState = State(0.0, 0.0, 0.0)
-                self.bezierFunction(state)
+        # finalStates3 = []
+        # for finals in finalStates2:
+        #     for state in finals:
+        #         self.finalState = State(0.0, 0.0, 0.0)
+        #         finalStates3.append(self.bezierFunction(state))
+        
+        # for finals2 in finalStates3:
+        #     for state in finals2:
+        #         self.finalState = State(0.0, 0.0, 0.0)
+        #         self.bezierFunction(state)
 
-        plt.grid()
-        plt.show()
+        # plt.grid()
+        # plt.show()
 
         # pass
 

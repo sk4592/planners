@@ -1,7 +1,7 @@
 #! /usr/bin/env python3
 
-from cmath import sqrt
-from math import floor, pi, cos, sin, tan
+from math import atan2, floor, pi, cos, sin, tan, atan, sqrt
+from turtle import distance
 from rclpy.node import Node
 from geometry_msgs.msg import Point, Pose
 from nav_msgs.msg import Path, OccupancyGrid, MapMetaData
@@ -10,6 +10,8 @@ import copy
 import threading
 from dataclasses import dataclass
 from scipy.spatial.transform import Rotation as R
+from global_planner.bezierPlanner import Bezier
+import numpy as np
 
 
 class Visualizer:
@@ -73,6 +75,11 @@ class State:
         return (self.x, self.y, self.theta)
 
 @dataclass
+class StateWithPath:
+    state: State
+    path: list[State]
+
+@dataclass
 class StateWithHeuristics:
     x: float
     y: float
@@ -105,6 +112,8 @@ class Astar():
         self.count = 0
         self.path = None
         self.viz_msg = MarkerArray()
+        self.angles = [0, pi/2]
+        self.positions = [(0.5, 0.5), (0.5, -0.5), (0.5, 0.0)]
 
         rotate = R.from_quat([self.startOrient.x, self.startOrient.y, self.startOrient.z, self.startOrient.w])
         self.orient = rotate.as_euler('zxy', degrees=False)
@@ -121,9 +130,11 @@ class Astar():
 
         # startcoord = self.indexFromWorldToMap(self.start)
         if (self.count == 0):
-            t1 = threading.Thread(target=self.runHybridAstar)
+            t1 = threading.Thread(target=self.demoFunction)
             t1.start()
         self.count += 1
+
+        
 
         # checking the initial point
         # pointInd = []
@@ -149,6 +160,180 @@ class Astar():
         
         self.ogm_pub.publish(self.msg)
         self.visualizer.viz.publish(self.viz_msg)
+
+    def demoFunction(self):
+        ptsList = []
+        startcoord = self.indexFromWorldToMap(self.start)
+        startind = self.getCoords(startcoord[1], startcoord[0])
+        finalStates = self.expandNeighborsBezier(StateWithHeuristics(startcoord[0], startcoord[1], self.orient[0], 0.0, 0.0))
+        for f in finalStates:
+            f.path.append(f.state)
+        for finalState in finalStates:
+            for point in finalState.path:
+                pts = self.indexFromMapToWorld(list((point.x, point.y)))
+                self.node.get_logger().info(f"pts: {pts}")
+                ptsList.append((pts[0], pts[1], point.theta))
+        ptsList.append((self.start.x, self.start.y, self.orient[0]))
+        self.viz_msg = self.visualizer.createArrowsFrompath(ptsList)
+
+    def getPrimitives(self):
+        primitives: list[State] = [
+            # rightside of the point/state
+            State(5, 5, 0.0),
+            State(5, 5, pi / 2),
+
+            # left side of the point/state
+            State(5, -5, 0.0),
+            State(5, -5, -pi / 2),
+
+            # straiight to the robot
+            State(5, 0, 0.0)
+        ]
+        distance = sqrt(5 ** 2 + 5 ** 2)
+        return primitives, distance
+
+
+    def bezierFunction(self, initialState: State):
+        finalState: State = State(0.0, 0.0, 0.0) # initialize to fill
+        finalStates: list[StateWithPath] = []
+        primitives, distance = self.getPrimitives()
+
+
+        for primitive in primitives:
+            d = sqrt(primitive.x ** 2 + primitive.y ** 2)
+            theta: float = 0.0
+            if primitive.x != 0:
+                theta = atan(primitive.y / primitive.x)
+            theta += initialState.theta
+            finalState.x = initialState.x + d * cos(theta)
+            finalState.y = initialState.y + d * sin(theta)
+            
+            finalState.theta = initialState.theta + primitive.theta
+            # print(f'finalState: {finalState}')
+            # finalStates.append(copy.deepcopy(finalState))
+            
+            # self.finalState = State(self.initialState.x + pose[0], self.initialState.y + pose[1], self.initialState.theta + angle*y)
+    
+            self.cp1, self.cp2 = self.getControlPoints(initialState, finalState, distance)
+
+            # states = [self.initialState, self.finalState, self.cp1, self.cp2]
+            # for state in states:
+            #     plt.plot(state.y, state.x, 'o')
+            
+            finalStates.append(copy.deepcopy(self.bezierEqn(initialState, finalState, self.cp1, self.cp2)))
+            # print(finalStates)
+        return finalStates
+
+    def getControlPoints(self, initialState: State, finalState: State, dist: float):
+        distance = dist
+        cpx = initialState.x + (distance * (1/3)) * cos(initialState.theta)
+        cpy = initialState.y + (distance * (1/3)) * sin(initialState.theta)
+        cp1 = State(cpx, cpy, initialState.theta)
+
+        cpx = finalState.x - (distance * (1/3)) * cos(finalState.theta)
+        cpy = finalState.y - (distance * (1/3)) * sin(finalState.theta)
+        cp2 = State(cpx, cpy, finalState.theta)
+
+        return cp1, cp2
+
+    def bezierEqn(self, initialState: State, finalState: State, cp1: State, cp2: State):
+        pathStates: list[State] = []
+        theta: float = 0
+        for t in np.linspace(0,1,25):
+            x: float = ((1 - t)**3) * (initialState.x) + 3 * ((1 - t)**2) * t * cp1.x + 3*(1-t)*(t**2)*cp2.x + (t**3) * finalState.x
+            y: float = ((1 - t)**3) * (initialState.y) + 3 * ((1 - t)**2) * t * cp1.y + 3*(1-t)*(t**2)*cp2.y + (t**3) * finalState.y
+
+            vecX = 3*(1-t**2)*(cp1.x - initialState.x) + 6*(1-t)*t*(cp2.x - cp1.x) + 3*(t**2)*(finalState.x - cp2.x)
+            vecY = 3*(1-t**2)*(cp1.y - initialState.y) + 6*(1-t)*t*(cp2.y - cp1.y) + 3*(t**2)*(finalState.y - cp2.y)
+
+            angle: float = atan2(vecY, vecX)
+            theta += initialState.theta + angle
+
+            pathStates.append(State(x, y, theta))
+        
+        return StateWithPath(finalState, pathStates) 
+
+    def expandNeighborsBezier(self, state: StateWithHeuristics):
+        neighbors: list[State] = []
+        initialState: StateWithHeuristics = state
+
+        finalStates: list[StateWithPath] = self.bezierFunction(initialState)
+        return finalStates
+
+    def collisionCheckBezier(self, state: StateWithPath, map: list[int]):
+        states: list[State] = state.path
+        states.append(state.state)
+        for _state in states:
+            ind = self.getCoords(int(_state.y), int(_state.x))
+            if map[ind] >= 50:
+                return True
+
+        return False
+
+    def runBezierAstar(self):
+            startcoord = self.indexFromWorldToMap(self.start)
+            startind = self.getCoords(startcoord[1], startcoord[0])
+
+            goalcoord = self.indexFromWorldToMap(self.goal)
+            goalind = self.getCoords(goalcoord[1], goalcoord[0])
+
+            self.node.get_logger().info(f"startcoord: {startcoord}")
+            self.node.get_logger().info(f"goalcoord: {goalcoord}")
+
+            numberOfStacks = 90
+
+            closedList = [[[0 for row in range(self.width)] for column in range(self.height)] for stack in range(numberOfStacks)]
+
+            goalState: StateWithHeuristics = StateWithHeuristics(goalcoord[0], goalcoord[1], 0.0, 0.0, 0.0)
+
+            pathData: dict[tuple, list] = {}
+            startState: StateWithHeuristics = StateWithHeuristics(startcoord[0], startcoord[1], self.orient[0], 0.0, 0.0)
+            stacknum = self.thetaToStack(startState.theta, numberOfStacks)
+            closedList[stacknum][floor(startState.x)][floor(startState.y)] = 1
+            openList: list[StateWithHeuristics] = []
+            openList.append(startState)
+
+            while len(openList) > 0:
+                openList.sort(key=self.hybridSort)
+
+                currNode: StateWithHeuristics = openList.pop(0)
+                pathData[currNode.getState().getTuple()] = []
+
+                if (int(currNode.x) == int(goalState.x)) and (int(currNode.y) == int(goalState.y)):
+                    pathData[currNode.getState().getTuple()].append(goalState.getState().getTuple())
+                    # path = self.constructPathHybrid(pathData, startState.getState().getTuple(), goalState.getState().getTuple())
+                    # self.viz_msg = self.visualizer.createArrowsFrompath(path)
+                    self.node.get_logger().info('path found')
+                    # self.paint(path)
+                    # self.node.get_logger().info(f'pathData: {pathData}')
+                    return 
+
+
+                for neighbor in self.expandNeighborsBezier(currNode):
+                    # self.node.get_logger().info(f'neighbor: {neighbor}')
+                    if self.collisionCheckBezier(neighbor, self.msg.data):
+                        continue
+                    
+                
+                    neighStack = self.thetaToStack(neighbor.theta, numberOfStacks)
+
+
+                    neighborWithHeuristic: StateWithHeuristics = StateWithHeuristics(neighbor.state.x, neighbor.state.y, neighbor.state.theta, 0.0, 0.0)
+                    neighborWithHeuristic.g += currNode.g + 0.0
+                    neighborWithHeuristic.f += neighborWithHeuristic.g + self.heuristic(neighbor, goalState)
+
+                    if closedList[neighStack][floor(neighbor.state.x)][floor(neighbor.state.y)] == 0:
+                        pathData[currNode.getState().getTuple()].append(neighbor.state.getTuple())
+                        closedList[neighStack][floor(neighbor.state.x)][floor(neighbor.state.y)] = 1
+                        openList.append(neighborWithHeuristic)
+                        # self.paintCell(neighbor)
+
+                pass
+
+            self.node.get_logger().info('No path found')
+
+
+
 
     def constructPathHybrid(self, path: dict[tuple, list[tuple]], start: tuple, goal: tuple):
         # self.node.get_logger().info(f'path: {path}')
@@ -193,7 +378,7 @@ class Astar():
             neighState = self.bicycleModel(state.getState(), delta)
             neighbors.append(neighState)
 
-        return neighbors   
+        return neighbors  
 
     def bicycleModel(self, state: State, delta: float):
         SPEED = 0.9
